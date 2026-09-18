@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>J.A.R.V.I.S.</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #050810; color: #c8d8f0; font-family: 'Courier New', monospace; min-height: 100vh; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
+  body::before { content: ''; position: fixed; inset: 0; background-image: linear-gradient(rgba(30,120,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(30,120,255,0.04) 1px, transparent 1px); background-size: 60px 60px; pointer-events: none; z-index: 0; }
+  header { position: relative; z-index: 1; text-align: center; padding: 2.5rem 1rem 1rem; }
+  header h1 { font-size: 2.8rem; font-weight: 700; letter-spacing: 0.35em; color: #4fc3f7; text-shadow: 0 0 24px rgba(79,195,247,0.5); }
+  header p { font-size: 0.72rem; letter-spacing: 0.2em; color: #4a6080; margin-top: 4px; }
+  main { position: relative; z-index: 1; width: 100%; max-width: 560px; padding: 0 1.5rem 2rem; display: flex; flex-direction: column; gap: 1.2rem; margin-top: 1.5rem; }
+  #orb-wrap { display: flex; justify-content: center; padding: 1rem 0; }
+  #orb { width: 120px; height: 120px; border-radius: 50%; border: 2px solid #1a3a6a; background: radial-gradient(circle at 35% 35%, #0d2040, #050810); position: relative; cursor: pointer; transition: border-color 0.3s; display: flex; align-items: center; justify-content: center; }
+  #orb:hover { border-color: #2a5aaa; }
+  #orb.listening { border-color: #4fc3f7; animation: orb-pulse 1s ease-in-out infinite; }
+  #orb.thinking { border-color: #ffb74d; animation: orb-spin 2s linear infinite; }
+  #orb.speaking { border-color: #81c784; animation: orb-breathe 0.8s ease-in-out infinite; }
+  @keyframes orb-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,195,247,0.4), 0 0 20px rgba(79,195,247,0.2); } 50% { box-shadow: 0 0 0 12px rgba(79,195,247,0), 0 0 40px rgba(79,195,247,0.4); } }
+  @keyframes orb-spin { from { box-shadow: 4px 0 16px rgba(255,183,77,0.5); } 25% { box-shadow: 0 4px 16px rgba(255,183,77,0.5); } 50% { box-shadow: -4px 0 16px rgba(255,183,77,0.5); } 75% { box-shadow: 0 -4px 16px rgba(255,183,77,0.5); } to { box-shadow: 4px 0 16px rgba(255,183,77,0.5); } }
+  @keyframes orb-breathe { 0%, 100% { box-shadow: 0 0 12px rgba(129,199,132,0.4); } 50% { box-shadow: 0 0 32px rgba(129,199,132,0.7); } }
+  #orb-icon { font-size: 2.4rem; user-select: none; color: #1e5aaa; transition: color 0.3s; }
+  #orb.listening #orb-icon { color: #4fc3f7; }
+  #orb.thinking #orb-icon { color: #ffb74d; }
+  #orb.speaking #orb-icon { color: #81c784; }
+  #orb-label { font-size: 0.68rem; letter-spacing: 0.18em; color: #3a5a80; text-align: center; margin-top: 6px; height: 14px; }
+  #chat { background: rgba(5,12,25,0.7); border: 1px solid #0f2040; border-radius: 4px; padding: 1rem; height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; scroll-behavior: smooth; }
+  #chat::-webkit-scrollbar { width: 4px; }
+  #chat::-webkit-scrollbar-track { background: transparent; }
+  #chat::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 2px; }
+  .msg { display: flex; flex-direction: column; gap: 2px; animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .msg-label { font-size: 0.62rem; letter-spacing: 0.15em; }
+  .msg-user .msg-label { color: #2a6a9a; }
+  .msg-jarvis .msg-label { color: #2a6a4a; }
+  .msg-text { font-size: 0.82rem; line-height: 1.55; padding: 6px 10px; border-radius: 3px; border-left: 2px solid; }
+  .msg-user .msg-text { color: #7ab8e0; background: rgba(30,80,140,0.12); border-left-color: #1e5aaa; }
+  .msg-jarvis .msg-text { color: #a0d4b0; background: rgba(30,100,60,0.12); border-left-color: #1e6a4a; }
+  .msg-sys .msg-text { color: #4a6080; background: transparent; border-left-color: #1e2a40; font-size: 0.72rem; font-style: italic; }
+  #controls { display: flex; gap: 8px; }
+  #textInput { flex: 1; background: rgba(5,15,35,0.8); border: 1px solid #1e3a5f; border-radius: 3px; color: #7ab8e0; font-family: 'Courier New', monospace; font-size: 0.8rem; padding: 8px 12px; outline: none; }
+  #textInput:focus { border-color: #2a5aaa; }
+  button.ctrl { background: rgba(15,30,60,0.8); border: 1px solid #1e3a5f; border-radius: 3px; color: #4a7aaa; font-family: 'Courier New', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+  button.ctrl:hover { background: rgba(30,60,120,0.3); border-color: #2a5aaa; color: #4fc3f7; }
+  button.ctrl.danger { border-color: #6a2a2a; color: #aa5a5a; }
+  button.ctrl.danger:hover { background: rgba(100,30,30,0.3); border-color: #aa3a3a; color: #ff8a80; }
+  #sysprompt-wrap { background: rgba(5,12,25,0.5); border: 1px solid #0f2040; border-radius: 4px; padding: 10px 12px; }
+  #sysprompt-label { font-size: 0.62rem; letter-spacing: 0.15em; color: #2a4060; margin-bottom: 5px; }
+  #sysPrompt { width: 100%; background: transparent; border: none; outline: none; color: #4a6a8a; font-family: 'Courier New', monospace; font-size: 0.72rem; line-height: 1.5; resize: vertical; min-height: 52px; }
+  #statusbar { display: flex; justify-content: space-between; align-items: center; font-size: 0.62rem; letter-spacing: 0.1em; color: #2a3a50; padding: 0 2px; }
+  #status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #1e3a5f; margin-right: 6px; vertical-align: middle; }
+  #status-dot.ready { background: #2a7a4a; }
+  #status-dot.busy { background: #ffb74d; }
+  #status-dot.error { background: #e57373; }
+  #mute-toggle { cursor: pointer; color: #2a4060; font-size: 0.65rem; background: none; border: none; font-family: 'Courier New', monospace; }
+  #mute-toggle:hover { color: #4a7aaa; }
+  #mute-toggle.muted { color: #6a3030; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>J.A.R.V.I.S.</h1>
+  <p>JUST A RATHER VERY INTELLIGENT SYSTEM</p>
+</header>
+
+<main>
+  <div id="orb-wrap">
+    <div style="display:flex;flex-direction:column;align-items:center;">
+      <div id="orb" title="Click to speak"><div id="orb-icon">&#9678;</div></div>
+      <div id="orb-label">STANDBY</div>
+    </div>
+  </div>
+
+  <div id="chat" aria-live="polite">
+    <div class="msg msg-sys"><div class="msg-text">System online. Awaiting your command, sir.</div></div>
+  </div>
+
+  <div id="controls">
+    <input id="textInput" type="text" placeholder="Or type a command..." />
+    <button class="ctrl" id="sendBtn">SEND</button>
+    <button class="ctrl danger" id="clearBtn">CLEAR</button>
+  </div>
+
+  <div id="sysprompt-wrap">
+    <div id="sysprompt-label">SYSTEM PROMPT</div>
+    <textarea id="sysPrompt" rows="2">You are JARVIS, Tony Stark's AI assistant. You are helpful, efficient, precise, and have a dry British wit. Keep responses concise and refer to the user as "sir" occasionally.</textarea>
+  </div>
+
+  <div id="statusbar">
+    <div><span id="status-dot"></span><span id="status-text">ONLINE</span></div>
+    <button id="mute-toggle">VOICE ON</button>
+  </div>
+</main>
+
+<script>
+const CHAT_API_URL = '/api/chat';
+const TTS_API_URL = 'http://localhost:5001/tts';
+
+let muted = false;
+let busy = false;
+
+const orb = document.getElementById('orb');
+const orbIcon = document.getElementById('orb-icon');
+const orbLabel = document.getElementById('orb-label');
+const chat = document.getElementById('chat');
+const textInput = document.getElementById('textInput');
+const sendBtn = document.getElementById('sendBtn');
+const clearBtn = document.getElementById('clearBtn');
+const sysPrompt = document.getElementById('sysPrompt');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const muteToggle = document.getElementById('mute-toggle');
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let speechSupported = false;
+
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  speechSupported = true;
+} else {
+  addMsg('sys', 'Speech recognition not supported. Use text input.');
+}
+
+orb.addEventListener('click', () => {
+  if (busy) return;
+  if (!speechSupported) { textInput.focus(); return; }
+  recognition.start();
+});
+
+if (recognition) {
+  recognition.onstart = () => { setOrbState('listening'); orbLabel.textContent = 'LISTENING...'; setStatus('busy', 'LISTENING'); };
+  recognition.onresult = (e) => {
+    const t = e.results[0][0].transcript;
+    addMsg('user', t);
+    setOrbState('thinking'); orbLabel.textContent = 'PROCESSING...';
+    handleQuery(t);
+  };
+  recognition.onerror = (e) => {
+    setOrbState(''); orbLabel.textContent = 'STANDBY';
+    setStatus('error', 'MIC ERROR');
+    addMsg('sys', 'Mic error: ' + e.error);
+    busy = false;
+  };
+  recognition.onend = () => {
+    if (!busy) { setOrbState(''); orbLabel.textContent = 'STANDBY'; setStatus('ready', 'ONLINE'); }
+  };
+}
+
+sendBtn.addEventListener('click', sendText);
+textInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendText(); });
+
+function sendText() {
+  const v = textInput.value.trim();
+  if (!v || busy) return;
+  textInput.value = '';
+  addMsg('user', v);
+  handleQuery(v);
+}
+
+clearBtn.addEventListener('click', () => { chat.innerHTML = ''; addMsg('sys', 'Log cleared.'); });
+
+muteToggle.addEventListener('click', () => {
+  muted = !muted;
+  muteToggle.textContent = muted ? 'VOICE OFF' : 'VOICE ON';
+  muteToggle.className = muted ? 'muted' : '';
+  if (muted) {
+    document.querySelectorAll('audio').forEach(a => { a.pause(); a.src = ''; });
+  }
+});
+
+async function handleQuery(input) {
+  busy = true;
+  setOrbState('thinking'); orbLabel.textContent = 'PROCESSING...'; setStatus('busy', 'THINKING');
+
+  try {
+    const response = await fetch(CHAT_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        model: 'z-ai/glm-5.3-flash',
+        messages: [
+          { role: 'system', content: sysPrompt.value.trim() },
+          { role: 'user', content: input }
+        ],
+        max_tokens: 1024,
+        temperature: 0.6,
+        top_p: 0.95,
+        stream: false
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.message || err.detail || 'HTTP ' + response.status);
+    }
+
+    const data = await response.json();
+    let reply = 'No response.';
+    if (data.choices && data.choices[0] && data.choices[0].message) reply = data.choices[0].message.content;
+    else if (data.reply) reply = data.reply;
+
+    addMsg('jarvis', reply);
+
+    if (!muted) {
+      setOrbState('speaking'); orbLabel.textContent = 'SPEAKING...';
+      speak(reply, () => {
+        setOrbState(''); orbLabel.textContent = 'STANDBY';
+        setStatus('ready', 'ONLINE');
+        busy = false;
+      });
+    } else {
+      setOrbState(''); orbLabel.textContent = 'STANDBY';
+      setStatus('ready', 'ONLINE');
+      busy = false;
+    }
+  } catch (err) {
+    const msg = 'I am unable to process that request, sir. ' + err.message;
+    addMsg('jarvis', msg);
+    setOrbState(''); orbLabel.textContent = 'STANDBY';
+    setStatus('error', 'ERROR');
+    setTimeout(() => setStatus('ready', 'ONLINE'), 2000);
+    busy = false;
+  }
+}
+
+async function speak(text, onEnd) {
+  try {
+    const res = await fetch(TTS_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.slice(0, 500) })
+    });
+    if (!res.ok) throw new Error('TTS ' + res.status);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => { URL.revokeObjectURL(url); if (onEnd) onEnd(); };
+    audio.onerror = () => { URL.revokeObjectURL(url); if (onEnd) onEnd(); };
+    await audio.play();
+  } catch (e) {
+    console.error('Piper TTS failed:', e);
+    if (onEnd) onEnd();
+  }
+}
+
+function addMsg(type, text) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg msg-' + (type === 'user' ? 'user' : type === 'jarvis' ? 'jarvis' : 'sys');
+  if (type !== 'sys') {
+    const l = document.createElement('div');
+    l.className = 'msg-label';
+    l.textContent = type === 'user' ? '[ YOU ]' : '[ JARVIS ]';
+    wrap.appendChild(l);
+  }
+  const p = document.createElement('div');
+  p.className = 'msg-text';
+  p.textContent = text;
+  wrap.appendChild(p);
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function setOrbState(state) {
+  orb.className = state || '';
+  const icons = { listening: '\u25C9', thinking: '\u25CC', speaking: '\u25CE', '': '\u25CE' };
+  orbIcon.textContent = icons[state] || '\u25CE';
+}
+
+function setStatus(type, text) {
+  statusDot.className = type;
+  statusText.textContent = text;
+}
+
+setStatus('ready', 'ONLINE');
+</script>
+</body>
+</html>
