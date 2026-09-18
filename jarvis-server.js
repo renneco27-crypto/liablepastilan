@@ -1,18 +1,22 @@
 require('dotenv').config();
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 
 const API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const PORT = process.env.PORT || 3000;
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+const COLAB_URL = process.env.COLAB_URL || '';
+const JARVIS_SECRET = process.env.JARVIS_SECRET || '';
+const PIPER_MODE = process.env.PIPER_MODE || 'local';
 
 if (!NVIDIA_API_KEY) {
   console.error('Missing NVIDIA_API_KEY in .env');
   process.exit(1);
 }
 
-// Model preference chain — first working one is used
 const MODEL_CHAIN = [
   'z-ai/glm-5.3-flash',
   'mistralai/mistral-nemotron',
@@ -21,10 +25,82 @@ const MODEL_CHAIN = [
   'ibm/granite-3.0-8b-instruct'
 ];
 
-http.createServer((req, res) => {
+const ALLOWED_PREFIXES = [
+  'start-process', 'stop-process', 'get-', 'dir', 'ls',
+  'echo', 'type ', 'copy ', 'move ', 'mkdir', 'cd ',
+  'where ', 'ipconfig', 'ping ', 'tasklist', 'taskkill'
+];
+const BLOCKED_PATTERNS = [
+  /remove-item/i,
+  /rm\s+-rf/i,
+  /format-volume/i,
+  /reg\s+delete/i,
+  /invoke-webrequest/i,
+  /invoke-expression/i,
+  /\biex\b/i,
+  /set-executionpolicy/i,
+  /new-localuser/i,
+  /net\s+user/i,
+  /shutdown/i,
+  /restart-computer/i,
+  /start-process\s+(powershell|cmd|pwsh)/i,
+];
+
+function isCommandSafe(cmd) {
+  if (!cmd || typeof cmd !== 'string') return false;
+  const lower = cmd.toLowerCase().trim();
+  for (const p of BLOCKED_PATTERNS) if (p.test(lower)) return false;
+  return ALLOWED_PREFIXES.some(p => lower.startsWith(p));
+}
+
+function forwardTTS(text) {
+  return new Promise((resolve, reject) => {
+    const target = (PIPER_MODE === 'colab' && COLAB_URL)
+      ? `${COLAB_URL}/tts`
+      : 'http://localhost:5001/tts';
+    const u = new URL(target);
+    const body = JSON.stringify({ text });
+    const lib = u.protocol === 'https:' ? https : http;
+
+    const req = lib.request({
+      hostname: u.hostname,
+      port: u.port || (u.protocol === 'https:' ? 443 : 80),
+      path: u.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'X-Jarvis-Secret': JARVIS_SECRET,
+        'ngrok-skip-browser-warning': 'true'
+      }
+    }, r => {
+      const chunks = [];
+      r.on('data', c => chunks.push(c));
+      r.on('end', () => resolve({
+        status: r.statusCode,
+        contentType: r.headers['content-type'] || 'audio/wav',
+        buffer: Buffer.concat(chunks)
+      }));
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
+  });
+}
+
+http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, X-Jarvis-Secret');
   if (req.method === 'OPTIONS') return res.writeHead(204).end();
 
   if (req.method === 'POST' && req.url === '/api/chat') {
@@ -38,7 +114,6 @@ http.createServer((req, res) => {
       }
 
       let lastErr = null, lastStatus = 502;
-
       for (const model of MODEL_CHAIN) {
         try {
           parsed.model = model;
@@ -52,13 +127,11 @@ http.createServer((req, res) => {
             body: JSON.stringify(parsed)
           });
           const t = await r.text();
-
           if (r.status === 410 || r.status === 404) {
             console.log('[skip] ' + model + ' (' + r.status + ')');
             lastErr = t; lastStatus = r.status;
             continue;
           }
-
           console.log('[ok] ' + model);
           res.writeHead(r.status, { 'Content-Type': 'application/json' });
           return res.end(t);
@@ -67,9 +140,48 @@ http.createServer((req, res) => {
           lastStatus = 502;
         }
       }
-
       res.writeHead(lastStatus, { 'Content-Type': 'application/json' });
       res.end(lastErr || JSON.stringify({ error: 'all models unavailable' }));
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/tts') {
+    try {
+      const raw = await readBody(req);
+      const { text } = JSON.parse(raw);
+      const out = await forwardTTS(text);
+      res.writeHead(out.status, { 'Content-Type': out.contentType });
+      return res.end(out.buffer);
+    } catch (e) {
+      console.error('TTS error:', e.message);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: e.message }));
+    }
+  }
+
+  if (req.method === 'POST' && req.url === '/run') {
+    const raw = await readBody(req);
+    let cmd;
+    try { cmd = JSON.parse(raw).command; } catch { cmd = null; }
+
+    if (!isCommandSafe(cmd)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        error: 'Command not allowed by safety policy',
+        command: cmd
+      }));
+    }
+
+    exec(cmd, { timeout: 30000, windowsHide: true }, (err, stdout, stderr) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        command: cmd,
+        ok: !err,
+        stdout: stdout || '',
+        stderr: stderr || '',
+        error: err ? err.message : null
+      }));
     });
     return;
   }

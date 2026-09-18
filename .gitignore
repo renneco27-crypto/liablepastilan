@@ -1,10 +1,8 @@
 @"
-.env
 node_modules/
-body.json
-mini.json
+.env
 *.log
-"@ | Out-File -Encoding utf8 .gitignore
-
-git add .
-git commit -m "Jarvis voice assistant: local NVIDIA proxy + Piper TTS via Colab"
+backups/
+*.bak
+.DS_Store
+"@ | Set-Content .gitignore

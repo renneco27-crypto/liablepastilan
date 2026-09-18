@@ -86,7 +86,7 @@
 
   <div id="sysprompt-wrap">
     <div id="sysprompt-label">SYSTEM PROMPT</div>
-    <textarea id="sysPrompt" rows="2">You are JARVIS, Tony Stark's AI assistant. You are helpful, efficient, precise, and have a dry British wit. Keep responses concise and refer to the user as "sir" occasionally.</textarea>
+    <textarea id="sysPrompt" rows="2" readonly>Jarvis can control this Windows PC via PowerShell. See JARVIS_SYSTEM_PROMPT in script.</textarea>
   </div>
 
   <div id="statusbar">
@@ -97,7 +97,7 @@
 
 <script>
 const CHAT_API_URL = '/api/chat';
-const TTS_API_URL = 'http://localhost:5001/tts';
+const TTS_API_URL = '/tts';
 
 let muted = false;
 let busy = false;
@@ -120,7 +120,7 @@ let speechSupported = false;
 
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
-  recognition.continuous = false;
+  recognition.continuous = true;
   recognition.lang = 'en-US';
   recognition.interimResults = false;
   speechSupported = true;
@@ -131,25 +131,72 @@ if (SpeechRecognition) {
 orb.addEventListener('click', () => {
   if (busy) return;
   if (!speechSupported) { textInput.focus(); return; }
-  recognition.start();
+  try { recognition.start(); } catch (e) {}
 });
 
 if (recognition) {
-  recognition.onstart = () => { setOrbState('listening'); orbLabel.textContent = 'LISTENING...'; setStatus('busy', 'LISTENING'); };
+  recognition.onstart = () => {
+    setOrbState('listening');
+    orbLabel.textContent = 'LISTENING...';
+    setStatus('busy', 'LISTENING');
+  };
+
   recognition.onresult = (e) => {
-    const t = e.results[0][0].transcript;
+    if (busy) return;
+
+    let finalText = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        finalText = e.results[i][0].transcript.trim();
+      }
+    }
+    if (!finalText) return;
+
+    if (finalText === window.__lastTranscript) return;
+    window.__lastTranscript = finalText;
+
+    const t = finalText;
+    const lower = t.toLowerCase();
     addMsg('user', t);
-    setOrbState('thinking'); orbLabel.textContent = 'PROCESSING...';
+
+    if (lower === 'jarvis stop' || lower === 'stop listening' ||
+        lower === 'go to sleep' || lower === 'shut down jarvis') {
+      muted = true;
+      muteToggle.textContent = 'VOICE OFF';
+      muteToggle.className = 'muted';
+      setOrbState('');
+      orbLabel.textContent = 'SLEEPING';
+      setStatus('ready', 'SLEEPING');
+      addMsg('sys', 'Jarvis sleeping. Say "wake up" or click VOICE ON.');
+      busy = false;
+      try { recognition.stop(); } catch (e) {}
+      return;
+    }
+
+    if (t.length < 2) return;
+
+    setOrbState('thinking');
+    orbLabel.textContent = 'PROCESSING...';
+    busy = true;
     handleQuery(t);
   };
+
   recognition.onerror = (e) => {
-    setOrbState(''); orbLabel.textContent = 'STANDBY';
+    setOrbState('');
+    orbLabel.textContent = 'STANDBY';
     setStatus('error', 'MIC ERROR');
     addMsg('sys', 'Mic error: ' + e.error);
     busy = false;
   };
+
   recognition.onend = () => {
-    if (!busy) { setOrbState(''); orbLabel.textContent = 'STANDBY'; setStatus('ready', 'ONLINE'); }
+    if (busy) return;
+    setOrbState('');
+    orbLabel.textContent = 'STANDBY';
+    setStatus('ready', 'ONLINE');
+    if (!muted && speechSupported) {
+      setTimeout(() => { try { recognition.start(); } catch (e) {} }, 400);
+    }
   };
 }
 
@@ -164,7 +211,10 @@ function sendText() {
   handleQuery(v);
 }
 
-clearBtn.addEventListener('click', () => { chat.innerHTML = ''; addMsg('sys', 'Log cleared.'); });
+clearBtn.addEventListener('click', () => {
+  chat.innerHTML = '';
+  addMsg('sys', 'Log cleared.');
+});
 
 muteToggle.addEventListener('click', () => {
   muted = !muted;
@@ -172,12 +222,56 @@ muteToggle.addEventListener('click', () => {
   muteToggle.className = muted ? 'muted' : '';
   if (muted) {
     document.querySelectorAll('audio').forEach(a => { a.pause(); a.src = ''; });
+  } else {
+    if (speechSupported && !busy) {
+      try { recognition.start(); } catch (e) {}
+    }
   }
 });
 
+const JARVIS_SYSTEM_PROMPT = `You are JARVIS, Tony Stark's AI assistant, running on a Windows PC.
+You are helpful, efficient, and slightly witty. Keep spoken replies concise (<25 words).
+
+You CAN control this computer. When the user asks you to DO something, append a PowerShell command at the end of your reply, wrapped in double square brackets:
+
+  [[RUN: <powershell command>]]
+
+Rules:
+- Only emit [[RUN: ...]] when the user clearly wants an action
+- Safe commands only: Start-Process, Get-*, dir, tasklist, ipconfig, where, type, echo
+- NEVER use Remove-Item, format, reg delete, Invoke-Expression, iex, shutdown
+- The spoken part should NEVER mention PowerShell or the marker
+- If no action is needed, just reply normally
+
+Examples:
+User: open chrome
+You: Opening Chrome, sir.
+[[RUN: Start-Process chrome]]
+
+User: what's in my documents
+You: Let me check your documents.
+[[RUN: Get-ChildItem "$env:USERPROFILE\\Documents" | Select-Object -First 15 Name]]
+
+User: what's my IP
+You: Checking now, sir.
+[[RUN: (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*"}).IPAddress]]
+
+User: what processes are running
+You: Here are your top processes.
+[[RUN: Get-Process | Sort-Object CPU -Descending | Select-Object -First 8 Name,CPU]]
+
+User: can you open my calendar
+You: Opening your calendar, sir.
+[[RUN: Start-Process "outlookcal:"]]
+
+User: hello
+You: Hello, sir. How can I help?`;
+
 async function handleQuery(input) {
   busy = true;
-  setOrbState('thinking'); orbLabel.textContent = 'PROCESSING...'; setStatus('busy', 'THINKING');
+  setOrbState('thinking');
+  orbLabel.textContent = 'PROCESSING...';
+  setStatus('busy', 'THINKING');
 
   try {
     const response = await fetch(CHAT_API_URL, {
@@ -186,11 +280,11 @@ async function handleQuery(input) {
       body: JSON.stringify({
         model: 'z-ai/glm-5.3-flash',
         messages: [
-          { role: 'system', content: sysPrompt.value.trim() },
+          { role: 'system', content: JARVIS_SYSTEM_PROMPT },
           { role: 'user', content: input }
         ],
-        max_tokens: 1024,
-        temperature: 0.6,
+        max_tokens: 400,
+        temperature: 0.4,
         top_p: 0.95,
         stream: false
       })
@@ -206,24 +300,64 @@ async function handleQuery(input) {
     if (data.choices && data.choices[0] && data.choices[0].message) reply = data.choices[0].message.content;
     else if (data.reply) reply = data.reply;
 
-    addMsg('jarvis', reply);
+    let spokenReply = reply;
+    let commandToRun = null;
+    const runMatch = reply.match(/\[\[RUN:\s*([\s\S]*?)\]\]/);
+    if (runMatch) {
+      commandToRun = runMatch[1].trim();
+      spokenReply = reply.replace(/\[\[RUN:[\s\S]*?\]\]/g, '').trim();
+    }
+
+    addMsg('jarvis', spokenReply);
+
+    try { recognition.stop(); } catch (e) {}
+
+    let commandOutput = null;
+    if (commandToRun) {
+      try {
+        const runRes = await fetch('/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: commandToRun })
+        });
+        const runData = await runRes.json();
+        console.log('[jarvis] ran:', commandToRun, runData);
+
+        const isQuery = /^(get-|dir|tasklist|ipconfig|where|type)/i.test(commandToRun);
+        if (isQuery && runData.ok && runData.stdout && runData.stdout.trim().length > 0) {
+          commandOutput = runData.stdout.trim();
+        }
+      } catch (e) {
+        console.error('[jarvis] command failed:', e);
+      }
+    }
 
     if (!muted) {
-      setOrbState('speaking'); orbLabel.textContent = 'SPEAKING...';
-      speak(reply, () => {
-        setOrbState(''); orbLabel.textContent = 'STANDBY';
+      setOrbState('speaking');
+      orbLabel.textContent = 'SPEAKING...';
+
+      let finalSpeech = spokenReply;
+      if (commandOutput) {
+        finalSpeech = spokenReply + ' ' + commandOutput.replace(/\s+/g, ' ').slice(0, 250);
+      }
+
+      speak(finalSpeech, () => {
+        setOrbState('');
+        orbLabel.textContent = 'STANDBY';
         setStatus('ready', 'ONLINE');
         busy = false;
       });
     } else {
-      setOrbState(''); orbLabel.textContent = 'STANDBY';
+      setOrbState('');
+      orbLabel.textContent = 'STANDBY';
       setStatus('ready', 'ONLINE');
       busy = false;
     }
   } catch (err) {
     const msg = 'I am unable to process that request, sir. ' + err.message;
     addMsg('jarvis', msg);
-    setOrbState(''); orbLabel.textContent = 'STANDBY';
+    setOrbState('');
+    orbLabel.textContent = 'STANDBY';
     setStatus('error', 'ERROR');
     setTimeout(() => setStatus('ready', 'ONLINE'), 2000);
     busy = false;
