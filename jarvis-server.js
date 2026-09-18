@@ -160,30 +160,25 @@ http.createServer(async (req, res) => {
     }
   }
 
+  // ═══ POST /run — proxy to Colab (which forwards to WinReach) ═══
   if (req.method === 'POST' && req.url === '/run') {
     const raw = await readBody(req);
-    let cmd;
-    try { cmd = JSON.parse(raw).command; } catch { cmd = null; }
-
-    if (!isCommandSafe(cmd)) {
-      res.writeHead(403, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
-        error: 'Command not allowed by safety policy',
-        command: cmd
-      }));
+    try {
+      const r = await fetch(`${COLAB_URL}/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Jarvis-Secret': JARVIS_SECRET
+        },
+        body: raw
+      });
+      const data = await r.text();
+      res.writeHead(r.status, { 'Content-Type': 'application/json' });
+      return res.end(data);
+    } catch (e) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: e.message }));
     }
-
-    exec(cmd, { timeout: 30000, windowsHide: true }, (err, stdout, stderr) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        command: cmd,
-        ok: !err,
-        stdout: stdout || '',
-        stderr: stderr || '',
-        error: err ? err.message : null
-      }));
-    });
-    return;
   }
 
   const file = req.url === '/' ? '/jarvis-frontend.html' : req.url.split('?')[0];
